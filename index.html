@@ -1,48 +1,46 @@
 <!DOCTYPE html>
 <html>
-	<head>
-		<style>
-			#stream, #pointCanvas, #pointOverlayCanvas {
-				position: absolute;
-				left: 0;
-				top: 0;
-			}
-			#pointCanvas {
-				left: 640px;
-			}
-			.controls {
-				position: absolute;
-				top: 480px;
-			}
-		</style>
-	</head>
+    <head>
+        <style>
+            #stream, #pointCanvas, #pointOverlayCanvas {
+                position: absolute;
+                left: 0;
+                top: 0;
+            }
+            #pointCanvas {
+                left: 640px;
+            }
+            .controls {
+                position: absolute;
+                top: 480px;
+            }
+        </style>
+    </head>
     <body>
         <img src="/video.mjpeg" id="stream" width="640" height="480">
         <canvas id="pointOverlayCanvas" width="640" height="480"></canvas>
         <canvas id="pointCanvas" width="640" height="480"></canvas>
         <div class="controls">
-			<button onclick="lamps(true);">Lamps on</button>
-			<button onclick="lamps(false);">Lamps off</button>
+            <button onclick="lamps(true);">Lamps on</button>
+            <button onclick="lamps(false);">Lamps off</button>
         </div>
         <script type="text/javascript">
-            console.log("Hi!0");
             var exampleSocket = new WebSocket("ws://" + location.host + "/ws");
             exampleSocket.onmessage = function (event) {
                 console.log(event.data);
             }
-    
+
             var keys = {
-		    a:false,s:false,d:false,w:false,
-		    A:false,S:false,D:false,W:false,
-		    f:false};
+                a:false,s:false,d:false,w:false,
+                A:false,S:false,D:false,W:false,
+                f:false
+            };
             var lastState = 0;
-   
+
             setInterval(() => {
                 for (var x in keys) keys[x] = false;
-		lastState = 0;
-	    }, 5000);
-
-            console.log("Hi!1");
+                lastState = 0;
+            }, 5000);
 
             function sendData(left, right) {
                 var myArray = new ArrayBuffer(4);
@@ -53,17 +51,17 @@
                 myData[3] = 0;
                 exampleSocket.send(myArray);
             }
-    
+
             function sendUpdate()
             {
-                var st = (keys.a ? 1 : 0) + (keys.s ? 2 : 0) + (keys.d ? 4 : 0) + (keys.w ? 8 : 0) + 
+                var st = (keys.a ? 1 : 0) + (keys.s ? 2 : 0) + (keys.d ? 4 : 0) + (keys.w ? 8 : 0) +
                          (keys.A ? 16 : 0) + (keys.S ? 32 : 0) + (keys.D ? 64 : 0) + (keys.W ? 128 : 0);
-    
+
                 if (lastState == st)
                     return;
-    
+
                 lastState = st;
-    
+
                 var left = 0;
                 var right = 0;
 
@@ -72,16 +70,16 @@
                         left += 30;
                         right += 30;
                     }
-    
+
                     if (keys.s) {
                         left -= 30;
                         right -= 30;
                     }
-    
+
                     if (keys.a) {
                         right -= 30;
                     }
-    
+
                     if (keys.d) {
                         left -= 30;
                     }
@@ -91,31 +89,28 @@
                     left += 60;
                     right += 60;
                 }
-    
+
                 if (keys.S) {
                     left -= 60;
                     right -= 60;
                 }
-    
+
                 if (keys.A) {
                     right -= 60;
                 }
-    
+
                 if (keys.D) {
                     left -= 60;
                 }
-    
+
                 if (keys.f) {
                     left *= 2;
                     right *= 2;
                 }
 
-
                 sendData(left, right);
             }
-    
-            console.log("Hi!2");
-    
+
             document.body.onkeydown = (e) => {
                 if (e.key in keys) {
                     keys[e.key] = true;
@@ -238,63 +233,63 @@
                 http.open('POST', "/frontlamps/" + (s ? "on" : "off"), true);
                 http.send();
             }
-            
+
             const _pointCanvas = document.querySelector('#pointCanvas');
             const pointCanvas = {
-				canvas: _pointCanvas,
-				width: _pointCanvas.width,
-				height: _pointCanvas.height,
-				ctx: _pointCanvas.getContext('2d')
-			};
-			
-			const _pointOverlayCanvas = document.querySelector('#pointOverlayCanvas');
+                canvas: _pointCanvas,
+                width: _pointCanvas.width,
+                height: _pointCanvas.height,
+                ctx: _pointCanvas.getContext('2d')
+            };
+
+            const _pointOverlayCanvas = document.querySelector('#pointOverlayCanvas');
             const pointOverlayCanvas = {
-				canvas: _pointOverlayCanvas,
-				width: _pointOverlayCanvas.width,
-				height: _pointOverlayCanvas.height,
-				ctx: _pointOverlayCanvas.getContext('2d')
-			};
-			
-			pointCanvas.ctx.fillStyle = '#FF00FF';
-			pointOverlayCanvas.ctx.font = '12px serif';
-			pointOverlayCanvas.ctx.fillStyle = '#FFFFFF';
-			pointOverlayCanvas.ctx.strokeStyle = '#00FF00';
-			
-			function flags2Color(f) {
-				let r = "00", g = "00", b = "00";
-				
-				//if ((f & 1) == 1) r = "FF";
-				if ((f & 2) == 2) g = "FF";
-				if ((f & 4) == 4) b = "FF";
-				return "#" + r + g + b;
-			}
-			
+                canvas: _pointOverlayCanvas,
+                width: _pointOverlayCanvas.width,
+                height: _pointOverlayCanvas.height,
+                ctx: _pointOverlayCanvas.getContext('2d')
+            };
+
+            pointCanvas.ctx.fillStyle = '#FF00FF';
+            pointOverlayCanvas.ctx.font = '12px serif';
+            pointOverlayCanvas.ctx.fillStyle = '#FFFFFF';
+            pointOverlayCanvas.ctx.strokeStyle = '#00FF00';
+
+            function flags2Color(f) {
+                let r = "00", g = "00", b = "00";
+
+                //if ((f & 1) == 1) r = "FF";
+                if ((f & 2) == 2) g = "FF";
+                if ((f & 4) == 4) b = "FF";
+                return "#" + r + g + b;
+            }
+
             setInterval(() => {
-				var newXHR = new XMLHttpRequest() || new window.ActiveXObject("Microsoft.XMLHTTP");
-				newXHR.open("GET", "/stats", true);
-				newXHR.send();
-				newXHR.onreadystatechange = function() {
-					if (this.status === 200 && this.readyState === 4) {
-						let data = JSON.parse(this.response);
-						pointCanvas.ctx.clearRect(0,0,pointCanvas.width, pointCanvas.height);
-						pointOverlayCanvas.ctx.clearRect(0,0,pointOverlayCanvas.width, pointOverlayCanvas.height);
-						
-						for (let i = 0; i < data.points.length; i++) {
-							let p = data.points[i];
-							pointCanvas.ctx.fillRect(((p[0]+1)/2)*pointCanvas.width, ((p[1]+1)/2)*pointCanvas.height, 2*p[2], 2*p[2]);
-						}
-						
-						for (let i = 0; i < data.overlay.length; i++) {
-							let p = data.overlay[i];
-							if (p.f == 0) continue;
-							pointOverlayCanvas.ctx.strokeStyle = flags2Color(p.f);
-							pointOverlayCanvas.ctx.strokeRect(p.x-2, p.y-2, 4, 4);
-						}
-						
-						pointOverlayCanvas.ctx.fillText("FPS: " + (data.fps.toFixed(2)), 5, 15);
-					}
-				};
-			}, 500);
-        </script>    
+                var newXHR = new XMLHttpRequest() || new window.ActiveXObject("Microsoft.XMLHTTP");
+                newXHR.open("GET", "/stats", true);
+                newXHR.send();
+                newXHR.onreadystatechange = function() {
+                    if (this.status === 200 && this.readyState === 4) {
+                        let data = JSON.parse(this.response);
+                        pointCanvas.ctx.clearRect(0,0,pointCanvas.width, pointCanvas.height);
+                        pointOverlayCanvas.ctx.clearRect(0,0,pointOverlayCanvas.width, pointOverlayCanvas.height);
+
+                        for (let i = 0; i < data.points.length; i++) {
+                            let p = data.points[i];
+                            pointCanvas.ctx.fillRect(((p[0]+1)/2)*pointCanvas.width, ((p[1]+1)/2)*pointCanvas.height, 2*p[2], 2*p[2]);
+                        }
+
+                        for (let i = 0; i < data.overlay.length; i++) {
+                            let p = data.overlay[i];
+                            if (p.f == 0) continue;
+                            pointOverlayCanvas.ctx.strokeStyle = flags2Color(p.f);
+                            pointOverlayCanvas.ctx.strokeRect(p.x-2, p.y-2, 4, 4);
+                        }
+
+                        pointOverlayCanvas.ctx.fillText("FPS: " + (data.fps.toFixed(2)), 5, 15);
+                    }
+                };
+            }, 500);
+        </script>
     </body>
 </html>

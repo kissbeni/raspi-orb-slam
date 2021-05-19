@@ -24,24 +24,24 @@
 #define CAPTURE_FORMAT raspicam::RASPICAM_FORMAT_GRAY
 
 class Semaphore {
-public:
-    Semaphore(int count = 0, int max = 1) : mCount{count}, mMax{max} {}
+    public:
+        Semaphore(int count = 0, int max = 1) : mCount{count}, mMax{max} {}
 
-    inline void notify() noexcept {
-        std::unique_lock<std::mutex> lock{mMutex};
-        mCount = std::min(mMax, mCount + 1);
-        mConditionVar.notify_one();
-    }
+        inline void notify() noexcept {
+            std::unique_lock<std::mutex> lock{mMutex};
+            mCount = std::min(mMax, mCount + 1);
+            mConditionVar.notify_one();
+        }
 
-    inline void wait() noexcept {
-        std::unique_lock<std::mutex> lock{mMutex};
-        while (!mCount) mConditionVar.wait(lock);
-        mCount--;
-    }
-private:
-    std::mutex mMutex;
-    std::condition_variable mConditionVar;
-    int mCount, mMax;
+        inline void wait() noexcept {
+            std::unique_lock<std::mutex> lock{mMutex};
+            while (!mCount) mConditionVar.wait(lock);
+            mCount--;
+        }
+    private:
+        std::mutex mMutex;
+        std::condition_variable mConditionVar;
+        int mCount, mMax;
 };
 
 volatile uint8_t lspeed = 0, rspeed = 0;
@@ -91,10 +91,8 @@ float currentFPS;
 Semaphore nextFrameSignal(1);
 Semaphore frameAvailableSignal(1);
 
-void cameraThread()
-{
-    while (true)
-    {
+void cameraThread() {
+    while (true) {
         nextFrameSignal.wait();
 
         camera.grab();
@@ -105,14 +103,12 @@ void cameraThread()
     }
 }
 
-void swapCameraBuffers()
-{
+void swapCameraBuffers() {
     currentCameraBuffer = (currentCameraBuffer + 1) % 2;
     nextFrameSignal.notify();
 }
 
-const uint8_t* getCameraBuffer()
-{
+const uint8_t* getCameraBuffer() {
     frameAvailableSignal.wait();
     return cameraBuffers[currentCameraBuffer];
 }
@@ -131,23 +127,22 @@ std::string createCameraData() {
     return content;
 }
 
-class CameraStreamer : public ICanRequestProtocolHandover {
-    public:
-        void acceptHandover(short& serverSock, short& clientSock) {
-            int sig;
+struct CameraStreamer : public ICanRequestProtocolHandover {
+    void acceptHandover(short& serverSock, short& clientSock) {
+        int sig;
 
-            while (serverSock > 0 && clientSock > 0) {
-                auto content = createCameraData();
+        while (serverSock > 0 && clientSock > 0) {
+            auto content = createCameraData();
 
-                if ((sig = send(clientSock, content.data(), content.length(), MSG_NOSIGNAL)) <= 0) {
-                    printf("Send failed");
-                    if (sig == EPIPE) continue;
-                    return;
-                }
-
-                usleep(1000000/20);
+            if ((sig = send(clientSock, content.data(), content.length(), MSG_NOSIGNAL)) <= 0) {
+                printf("Send failed");
+                if (sig == EPIPE) continue;
+                return;
             }
+
+            usleep(1000000/20);
         }
+    }
 };
 
 int main(int argc, char **argv)

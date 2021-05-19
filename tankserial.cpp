@@ -32,7 +32,7 @@ bool TankSerial::open() {
     }
 
     struct termios tty;
-    
+
     if (tcgetattr(mPortFD, &tty) != 0) {
         fprintf(stderr, "TankSerial failed to get termios: %i (%s)\n", errno, strerror(errno));
         return false;
@@ -128,7 +128,7 @@ bool TankSerial::sendCommandRaw(const TankOpcode opc, std::initializer_list<uint
     packet[0] = 0x18; // ASCII CAN (cancel)
     packet[1] = 0x11; // ASCII DC1 (device control 1)
     packet[2] = opc | (args.size() << 4);
-    
+
     std::copy(args.begin(), args.end(), &packet[3]);
 
     uint8_t checksum = 0;
