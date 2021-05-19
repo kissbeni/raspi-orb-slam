@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<style>
+			#stream, #pointCanvas, #pointOverlayCanvas {
+				position: absolute;
+				left: 0;
+				top: 0;
+			}
+			#pointCanvas {
+				left: 640px;
+			}
+			.controls {
+				position: absolute;
+				top: 480px;
+			}
+		</style>
+	</head>
+    <body>
+        <img src="/video.mjpeg" id="stream" width="640" height="480">
+        <canvas id="pointOverlayCanvas" width="640" height="480"></canvas>
+        <canvas id="pointCanvas" width="640" height="480"></canvas>
+        <div class="controls">
+			<button onclick="lamps(true);">Lamps on</button>
+			<button onclick="lamps(false);">Lamps off</button>
+        </div>
+        <script type="text/javascript">
+            console.log("Hi!0");
+            var exampleSocket = new WebSocket("ws://" + location.host + "/ws");
+            exampleSocket.onmessage = function (event) {
+                console.log(event.data);
+            }
+    
+            var keys = {
+		    a:false,s:false,d:false,w:false,
+		    A:false,S:false,D:false,W:false,
+		    f:false};
+            var lastState = 0;
+   
+            setInterval(() => {
+                for (var x in keys) keys[x] = false;
+		lastState = 0;
+	    }, 5000);
+
+            console.log("Hi!1");
+
+            function sendData(left, right) {
+                var myArray = new ArrayBuffer(4);
+                var myData = new Uint8Array(myArray);
+                myData[0] = 0x01;
+                myData[1] = left;
+                myData[2] = right;
+                myData[3] = 0;
+                exampleSocket.send(myArray);
+            }
+    
+            function sendUpdate()
+            {
+                var st = (keys.a ? 1 : 0) + (keys.s ? 2 : 0) + (keys.d ? 4 : 0) + (keys.w ? 8 : 0) + 
+                         (keys.A ? 16 : 0) + (keys.S ? 32 : 0) + (keys.D ? 64 : 0) + (keys.W ? 128 : 0);
+    
+                if (lastState == st)
+                    return;
+    
+                lastState = st;
+    
+                var left = 0;
+                var right = 0;
+
+                if ((st & 0xf0) == 0) {
+                    if (keys.w) {
+                        left += 30;
+                        right += 30;
+                    }
+    
+                    if (keys.s) {
+                        left -= 30;
+                        right -= 30;
+                    }
+    
+                    if (keys.a) {
+                        right -= 30;
+                    }
+    
+                    if (keys.d) {
+                        left -= 30;
+                    }
+                }
+
+                if (keys.W) {
+                    left += 60;
+                    right += 60;
+                }
+    
+                if (keys.S) {
+                    left -= 60;
+                    right -= 60;
+                }
+    
+                if (keys.A) {
+                    right -= 60;
+                }
+    
+                if (keys.D) {
+                    left -= 60;
+                }
+    
+                if (keys.f) {
+                    left *= 2;
+                    right *= 2;
+                }
+
+
+                sendData(left, right);
+            }
+    
+            console.log("Hi!2");
+    
+            document.body.onkeydown = (e) => {
+                if (e.key in keys) {
+                    keys[e.key] = true;
+                    sendUpdate();
+                }
+            };
+            document.body.onkeyup = (e) => {
+                if (e.key in keys) {
+                    keys[e.key] = false;
+                    sendUpdate();
+                }
+            };
+
+            var haveEvents = 'ongamepadconnected' in window;
+            var controllers = {};
+
+            function connecthandler(e) {
+                addgamepad(e.gamepad);
+            }
+
+            function addgamepad(gamepad) {
+                controllers[gamepad.index] = gamepad;
+
+                var d = document.createElement("div");
+                d.setAttribute("id", "controller" + gamepad.index);
+
+                var t = document.createElement("h1");
+                t.appendChild(document.createTextNode("gamepad: " + gamepad.id));
+                d.appendChild(t);
+
+                var a = document.createElement("div");
+                a.className = "axes";
+
+                for (var i = 0; i < gamepad.axes.length; i++) {
+                    var p = document.createElement("progress");
+                    p.className = "axis";
+                    //p.id = "a" + i;
+                    p.setAttribute("max", "2");
+                    p.setAttribute("value", "1");
+                    p.innerHTML = i;
+                    a.appendChild(p);
+                }
+
+                d.appendChild(a);
+                document.body.appendChild(d);
+                requestAnimationFrame(updateStatus);
+            }
+
+            function disconnecthandler(e) {
+                removegamepad(e.gamepad);
+            }
+
+            function removegamepad(gamepad) {
+                var d = document.getElementById("controller" + gamepad.index);
+                document.body.removeChild(d);
+                delete controllers[gamepad.index];
+            }
+
+            var lastLeft = 0, lastRight = 0;
+
+            function updateStatus() {
+                if (!haveEvents) {
+                    scangamepads();
+                }
+
+                var i = 0;
+                var j;
+
+                for (j in controllers) {
+                    var controller = controllers[j];
+                    var d = document.getElementById("controller" + j);
+
+                    var axes = d.getElementsByClassName("axis");
+                    for (i = 0; i < controller.axes.length; i++) {
+                        var a = axes[i];
+                        if (i == 3) {
+                            //console.log(1, controller.axes[i]);
+                            let l = -Math.round(controller.axes[i]*100);
+                            if (l != lastLeft) {
+                                lastLeft = l;
+                                sendData(lastLeft, lastRight);
+                            }
+                        } else if (i == 1) {
+                            let l = -Math.round(controller.axes[i]*100);
+                            if (l != lastRight) {
+                                lastRight = l;
+                                sendData(lastLeft, lastRight);
+                            }
+                        }
+                        a.innerHTML = i + ": " + controller.axes[i].toFixed(4);
+                        a.setAttribute("value", controller.axes[i] + 1);
+                    }
+                }
+
+                requestAnimationFrame(updateStatus);
+            }
+
+            function scangamepads() {
+                var gamepads = navigator.getGamepads ? navigator.getGamepads() : (navigator.webkitGetGamepads ? navigator.webkitGetGamepads() : []);
+                for (var i = 0; i < gamepads.length; i++) {
+                    if (gamepads[i]) {
+                        if (gamepads[i].index in controllers) {
+                            controllers[gamepads[i].index] = gamepads[i];
+                        } else {
+                            addgamepad(gamepads[i]);
+                        }
+                    }
+                }
+            }
+
+            window.addEventListener("gamepadconnected", connecthandler);
+            window.addEventListener("gamepaddisconnected", disconnecthandler);
+
+            if (!haveEvents) {
+                setInterval(scangamepads, 500);
+            }
+
+            function lamps(s) {
+                var http = new XMLHttpRequest();
+                http.open('POST', "/frontlamps/" + (s ? "on" : "off"), true);
+                http.send();
+            }
+            
+            const _pointCanvas = document.querySelector('#pointCanvas');
+            const pointCanvas = {
+				canvas: _pointCanvas,
+				width: _pointCanvas.width,
+				height: _pointCanvas.height,
+				ctx: _pointCanvas.getContext('2d')
+			};
+			
+			const _pointOverlayCanvas = document.querySelector('#pointOverlayCanvas');
+            const pointOverlayCanvas = {
+				canvas: _pointOverlayCanvas,
+				width: _pointOverlayCanvas.width,
+				height: _pointOverlayCanvas.height,
+				ctx: _pointOverlayCanvas.getContext('2d')
+			};
+			
+			pointCanvas.ctx.fillStyle = '#FF00FF';
+			pointOverlayCanvas.ctx.font = '12px serif';
+			pointOverlayCanvas.ctx.fillStyle = '#FFFFFF';
+			pointOverlayCanvas.ctx.strokeStyle = '#00FF00';
+			
+			function flags2Color(f) {
+				let r = "00", g = "00", b = "00";
+				
+				//if ((f & 1) == 1) r = "FF";
+				if ((f & 2) == 2) g = "FF";
+				if ((f & 4) == 4) b = "FF";
+				return "#" + r + g + b;
+			}
+			
+            setInterval(() => {
+				var newXHR = new XMLHttpRequest() || new window.ActiveXObject("Microsoft.XMLHTTP");
+				newXHR.open("GET", "/stats", true);
+				newXHR.send();
+				newXHR.onreadystatechange = function() {
+					if (this.status === 200 && this.readyState === 4) {
+						let data = JSON.parse(this.response);
+						pointCanvas.ctx.clearRect(0,0,pointCanvas.width, pointCanvas.height);
+						pointOverlayCanvas.ctx.clearRect(0,0,pointOverlayCanvas.width, pointOverlayCanvas.height);
+						
+						for (let i = 0; i < data.points.length; i++) {
+							let p = data.points[i];
+							pointCanvas.ctx.fillRect(((p[0]+1)/2)*pointCanvas.width, ((p[1]+1)/2)*pointCanvas.height, 2*p[2], 2*p[2]);
+						}
+						
+						for (let i = 0; i < data.overlay.length; i++) {
+							let p = data.overlay[i];
+							if (p.f == 0) continue;
+							pointOverlayCanvas.ctx.strokeStyle = flags2Color(p.f);
+							pointOverlayCanvas.ctx.strokeRect(p.x-2, p.y-2, 4, 4);
+						}
+						
+						pointOverlayCanvas.ctx.fillText("FPS: " + (data.fps.toFixed(2)), 5, 15);
+					}
+				};
+			}, 500);
+        </script>    
+    </body>
+</html>

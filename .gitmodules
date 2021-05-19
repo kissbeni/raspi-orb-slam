@@ -1,0 +1,6 @@
+[submodule "ORB_SLAM2"]
+	path = ORB_SLAM2
+	url = git@github.com:kissbeni/ORB_SLAM2.git
+[submodule "tinyhttp"]
+	path = tinyhttp
+	url = git@github.com:kissbeni/tinyhttp.git
