@@ -3,31 +3,24 @@
 #define _WS_CLIENT_HANDLER
 
 #include <http.hpp>
+#include <set>
 #include "protocol/vector_stream.h"
 #include "protocol/packets.h"
 
+namespace packetHandlers {
+    void handlePacket(MovePacket* pkt);
+    void handlePacket(StopPacket* pkt);
+    void handlePacket(LedsPacket* pkt);
+}
+
 struct TankProtocolHandler : public WebsockClientHandler {
-    void onConnect() override {
-        puts("Connect!");
-    }
+    void onConnect() override;
+    void onBinaryMessage(const std::vector<uint8_t>& data) override;
+    void onDisconnect() override;
 
-    void onBinaryMessage(const std::vector<uint8_t>& data) override {
-        char packetObjectMem[getMaximumPacketObjectSize()];
-
-        switch (data[0] >> 5)
-        {
-            case PacketOpcode::MOVE:
-                handlePacket(deserializePacket<MovePacket>(packetObjectMem, data)); break;
-            case PacketOpcode::STOP:
-                handlePacket(deserializePacket<StopPacket>(packetObjectMem, data)); break;
-            default:
-                puts("Received invalid packet");
-                break;
-        }
-    }
-
-    void onDisconnect() override {
-        puts("Disconnect!");
+    template<PacketOpcode opcode>
+    static void sendToAll(const BasePacket<opcode>& pkt) {
+        sendToAll(pkt);
     }
 
     private:
@@ -38,7 +31,8 @@ struct TankProtocolHandler : public WebsockClientHandler {
             return res;
         }
 
-        void handlePacket(MovePacket* pkt);
+        static std::set<TankProtocolHandler*> mAllClients;
+        static void sendToAll(const Serializable& ser);
 };
 
 #endif

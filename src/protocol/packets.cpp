@@ -33,6 +33,12 @@ void MovePacket::deserialize(VectorStream& from) {
     _DESERIALIZE_FIELD(mRightSpeed)
 }
 
+std::vector<uint8_t> StopPacket::serialize() const {
+    _SERIALIZE_BEGIN
+    _SERIALIZE_RETURN
+}
+void StopPacket::deserialize(VectorStream& from) {}
+
 
 LedColor::LedColor(uint8_t r, uint8_t g, uint8_t b)
     : mRed{r}, mGreen{g}, mBlue{b} {}
@@ -57,4 +63,18 @@ std::vector<uint8_t> LedsPacket::serialize() const {
 }
 void LedsPacket::deserialize(VectorStream& from) {
     _DESERIALIZE_FIELD(mLeds)
+}
+
+
+std::vector<uint8_t> ReportPacket::serialize() const {
+    _SERIALIZE_BEGIN
+    _SERIALIZE_FIELD(mFps)
+    _SERIALIZE_FIELD(mOverlay)
+    _SERIALIZE_FIELD(mWorldPoints)
+    _SERIALIZE_RETURN
+}
+void ReportPacket::deserialize(VectorStream& from) {
+    _DESERIALIZE_FIELD(mFps)
+    _DESERIALIZE_FIELD(mOverlay)
+    _DESERIALIZE_FIELD(mWorldPoints)
 }

@@ -17,6 +17,7 @@
 #include "http.hpp"
 #include "tankserial.h"
 #include "toojpeg.h"
+#include "client_handler.h"
 
 #define CAPTURE_BUFFER_COUNT 2
 #define CAPTURE_WIDTH  (640)
@@ -46,34 +47,6 @@ class Semaphore {
 
 volatile uint8_t lspeed = 0, rspeed = 0;
 
-class TankProtocolHandler : public WebsockClientHandler {
-    public:
-        void onConnect() override {
-            puts("Connect!");
-        }
-
-        void onBinaryMessage(const uint8_t* message, const size_t len) override {
-            if (len != 4 || message[0] != 0x01)
-            {
-                puts("Received invalid websock message");
-                return;
-            }
-
-            printf("left=%d right=%d\n", message[1], message[2]);
-            lspeed = message[1];
-            rspeed = message[2];
-        }
-
-        void onDisconnect() override {
-            puts("Disconnect!");
-        }
-};
-
-struct OverlayPoint {
-    float x, y;
-    uint8_t flags;
-};
-
 HttpServer gHttpServer;
 TankSerial gTankSerial("/dev/ttyS0");
 
@@ -85,8 +58,7 @@ volatile size_t currentCameraBuffer;
 
 std::mutex           worldPosListMutex;
 std::vector<cv::Mat> worldPosList;
-std::vector<OverlayPoint> overlayPosList;
-float currentFPS;
+ReportPacket reportPacket;
 
 Semaphore nextFrameSignal(1);
 Semaphore frameAvailableSignal(1);
@@ -128,22 +100,32 @@ std::string createCameraData() {
 }
 
 struct CameraStreamer : public ICanRequestProtocolHandover {
-    void acceptHandover(short& serverSock, short& clientSock) {
-        int sig;
-
-        while (serverSock > 0 && clientSock > 0) {
+    void acceptHandover(short& serverSock, IClientStream& client, std::unique_ptr<HttpRequest>) {
+        while (serverSock > 0 && client.isOpen()) {
             auto content = createCameraData();
 
-            if ((sig = send(clientSock, content.data(), content.length(), MSG_NOSIGNAL)) <= 0) {
-                printf("Send failed");
-                if (sig == EPIPE) continue;
-                return;
-            }
+            client.send(content.data(), content.length());
 
             usleep(1000000/20);
         }
     }
 };
+
+namespace packetHandlers {
+    void handlePacket(MovePacket* pkt) {
+        gTankSerial.speed(pkt->mLeftSpeed, pkt->mRightSpeed);
+    }
+
+    void handlePacket(StopPacket* pkt) {
+        gTankSerial.stop();
+    }
+
+    void handlePacket(LedsPacket* pkt) {
+        size_t i = 0;
+        for (const auto& l : pkt->mLeds)
+            gTankSerial.setLedColor(i++, l->mRed, l->mGreen, l->mBlue);
+    }
+}
 
 int main(int argc, char **argv)
 {
@@ -188,7 +170,7 @@ int main(int argc, char **argv)
     CameraStreamer stream;
 
     gHttpServer.when("/")->serveFile("index.html");
-    gHttpServer.when("/frontlamps/on")->posted([](const HttpRequest& req) {
+    /*gHttpServer.when("/frontlamps/on")->posted([](const HttpRequest& req) {
         for (int i = 4; i < 8; i++)
             gTankSerial.setLedColor(i, 255, 255, 255);
         return HttpResponse{200};
@@ -219,7 +201,7 @@ int main(int argc, char **argv)
 
         ss << "],\"fps\":" << std::fixed << currentFPS << "}";
         return HttpResponse{200, "application/json", ss.str()};
-    });
+    });*/
     gHttpServer.when("/video.mjpeg")->requested([&stream](const HttpRequest& req) {
         HttpResponse res{200};
         res["Age"] = "0";
@@ -300,22 +282,23 @@ int main(int argc, char **argv)
         if ((tframe - lastWorldSave) > 500000) {
             //std::cout << "Updating point list" << std::endl;
             std::unique_lock<std::mutex> lock{worldPosListMutex};
-            worldPosList.clear();
+            reportPacket.mWorldPoints.clear();
             for (auto& p : SLAM.GetTrackedMapPoints()) {
                 if (!p) continue;
                 //std::cout << ((void*)p) << std::endl;
-                worldPosList.push_back(p->GetWorldPos());
+                const auto& pos = p->GetWorldPos();
+                reportPacket.mWorldPoints.push_back({pos.at<float>(0), pos.at<float>(1), pos.at<float>(2)});
             }
             //overlayPosList = SLAM.GetTrackedKeyPointsUn();
-            overlayPosList.clear();
+            reportPacket.mOverlay.clear();
             if (SLAM.mpTracker->mLastProcessedState == ORB_SLAM2::Tracking::OK) {
                 auto keys = SLAM.mpTracker->mCurrentFrame.mvKeys;
-                overlayPosList.resize(keys.size());
+                reportPacket.mOverlay.resize(keys.size());
                 for (size_t i = 0; i < keys.size(); i++) {
                     auto& k = keys[i];
                     auto& p = SLAM.mpTracker->mCurrentFrame.mvpMapPoints[i];
 
-                    auto& overlay = overlayPosList[i];
+                    auto& overlay = reportPacket.mOverlay[i];
                     overlay.x = k.pt.x;
                     overlay.y = k.pt.y;
                     overlay.flags = 0;
@@ -334,6 +317,8 @@ int main(int argc, char **argv)
                 }
             }
 
+            TankProtocolHandler::sendToAll(reportPacket);
+
             lastWorldSave = tframe;
         }
 
@@ -342,7 +327,7 @@ int main(int argc, char **argv)
         //double ttrack = std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
         //double ttotal = (tframe - prev_frame) / 1000000.0;
 
-        currentFPS = 1.0f/((tframe-prev_frame) / 1000000.0f);
+        reportPacket.mFps = 1.0f/((tframe-prev_frame) / 1000000.0f);
         //printf("grab time: %.04lf, track time: %.04lf, frame time: %llu, total: %.04lf, fps: %.1f\n", tgrab, ttrack, tframe, ttotal, 1.0/((tframe-prev_frame) / 1000000.0));
         prev_frame = tframe;
         // usleep(66666); // 15 fps

@@ -28,6 +28,11 @@ struct MovePacket : BasePacket<PacketOpcode::MOVE> {
     virtual void deserialize(VectorStream& from) override;
 };
 
+struct StopPacket : BasePacket<PacketOpcode::STOP> {
+    virtual std::vector<uint8_t> serialize() const override;
+    virtual void deserialize(VectorStream& from) override;
+};
+
 struct LedColor : Serializable {
     uint8_t mRed, mGreen, mBlue;
 
@@ -40,6 +45,26 @@ struct LedColor : Serializable {
 
 struct LedsPacket : BasePacket<PacketOpcode::LEDS> {
     std::vector<std::unique_ptr<LedColor>> mLeds;
+
+    virtual std::vector<uint8_t> serialize() const override;
+    virtual void deserialize(VectorStream& from) override;
+};
+
+struct OverlayPoint : Serializable {
+    uint16_t x, y;
+    uint8_t flags;
+
+    OverlayPoint() = default;
+    OverlayPoint(uint16_t x, uint16_t y, uint8_t f);
+
+    virtual std::vector<uint8_t> serialize() const override;
+    virtual void deserialize(VectorStream& from) override;
+};
+
+struct ReportPacket : BasePacket<PacketOpcode::PPUD> {
+    float mFps;
+    std::vector<OverlayPoint> mOverlay;
+    std::vector<vec3> mWorldPoints;
 
     virtual std::vector<uint8_t> serialize() const override;
     virtual void deserialize(VectorStream& from) override;
