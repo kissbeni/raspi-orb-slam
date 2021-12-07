@@ -68,5 +68,18 @@ int main(int argc, char const *argv[])
 
     dumpVector(res3);
 
+    vec3 testvec3;
+    testvec3.x = 69.4258;
+    testvec3.y = 12345;
+    testvec3.z = 3.141592654;
+    std::vector<uint8_t> res4;
+    Serializer::serialize(testvec3, res4);
+    dumpVector(res4);
+
+    VectorStream vs3{res4};
+    vec3 testvec3_t;
+    Serializer::deserialize(testvec3_t, vs3);
+    printf("%.4f, %.4f, %.4f\n", testvec3_t.x, testvec3_t.y, testvec3_t.z);
+
     return 0;
 }

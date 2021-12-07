@@ -75,7 +75,7 @@ void Serializer::deserialize(uint64_t& num, VectorStream& from) {
 
 /* static */
 void Serializer::serialize(const std::string& str, std::vector<uint8_t>& to) {
-    serialize(str.length(), to);
+    serialize(static_cast<uint64_t>(str.length()), to);
     to.resize(to.size() + str.size());
     std::copy(str.begin(), str.end(), to.end() - str.size());
 }
@@ -136,17 +136,74 @@ void Serializer::deserialize(vec2& vec, VectorStream& from) {
 
 /* static */
 void Serializer::serialize(const vec3 vec, std::vector<uint8_t>& to) {
-    // TODO
-    serialize(vec.x, to);
-    serialize(vec.y, to);
-    serialize(vec.z, to);
+    uint64_t ux = *reinterpret_cast<const uint32_t*>(&vec.x);
+    uint64_t uy = *reinterpret_cast<const uint32_t*>(&vec.y);
+    uint64_t uz = *reinterpret_cast<const uint32_t*>(&vec.z);
+
+    uint8_t ex = ((ux >> 23) & 0xFF) - 127;
+    uint8_t ey = ((uy >> 23) & 0xFF) - 127;
+    uint8_t ez = ((uz >> 23) & 0xFF) - 127;
+
+    uint64_t res = 0;
+
+    res |= static_cast<uint64_t>(!!(ux & (1 << 31))) << 63; // sign of X
+    res |= static_cast<uint64_t>(ex & 0x1F) << 58;          // exponent of X
+    res |= ((ux >> 8) & 0x7fff) << 43;                      // mantissa of X
+
+    res |=static_cast<uint64_t>(!!(uy & (1 << 31))) << 42;  // sign of Y
+    res |= static_cast<uint64_t>(ey & 0x1F) << 37;          // exponent of Y
+    res |= ((uy >> 8) & 0x7fff) << 22;                      // mantissa of Y
+
+    res |= static_cast<uint64_t>(!!(uz & (1 << 31))) << 21; // sign of Z
+    res |= static_cast<uint64_t>(ez & 0x1F) << 16;          // exponent of Z
+    res |= ((uz >> 8) & 0x7fff) << 1;                       // mantissa of Z
+
+    // Rounding bit
+    res |= (!!(ux & (1 << 16)) + !!(uy & (1 << 16)) + !!(uz & (1 << 16)) >= 2);
+
+    uint8_t tmp[8];
+    tmp[0] = res & 0xFF;
+    tmp[1] = (res >> 8) & 0xFF;
+    tmp[2] = (res >> 16) & 0xFF;
+    tmp[3] = (res >> 24) & 0xFF;
+    tmp[4] = (res >> 32) & 0xFF;
+    tmp[5] = (res >> 40) & 0xFF;
+    tmp[6] = (res >> 48) & 0xFF;
+    tmp[7] = (res >> 56) & 0xFF;
+    to.insert(to.end(), tmp, tmp + 8);
 }
 /* static */
 void Serializer::deserialize(vec3& vec, VectorStream& from) {
-    // TODO
-    deserialize(vec.x, from);
-    deserialize(vec.y, from);
-    deserialize(vec.z, from);
+    uint64_t in = 0;
+    in |= from.get();
+    in |= ((uint64_t)from.get()) << 8;
+    in |= ((uint64_t)from.get()) << 16;
+    in |= ((uint64_t)from.get()) << 24;
+    in |= ((uint64_t)from.get()) << 32;
+    in |= ((uint64_t)from.get()) << 40;
+    in |= ((uint64_t)from.get()) << 48;
+    in |= ((uint64_t)from.get()) << 56;
+
+    uint8_t roundingBit = in & 1;
+
+    uint32_t temp;
+    temp = 0;
+    temp |= static_cast<uint32_t>(!!(in & (1ull << 63))) << 31;                             // sign of X
+    temp |= (((0xe0ul << 5)*(in & (1ull << 62)) | ((in >> 58)& 0x1full)) + 127) << 23;      // exponent of X
+    temp |= (0xff*roundingBit) | (((in >> 43) & 0x7fffull) << 8);                           // mantissa of X
+    vec.x = *reinterpret_cast<float*>(&temp);
+
+    temp = 0;
+    temp |= static_cast<uint32_t>(!!(in & (1ull << 42))) << 31;                             // sign of Y
+    temp |= (((0xe0ul << 5)*(in & (1ull << 41)) | ((in >> 37)& 0x1full)) + 127) << 23;      // exponent of Y
+    temp |= (0xff*roundingBit) | (((in >> 22) & 0x7fffull) << 8);                           // mantissa of Y
+    vec.y = *reinterpret_cast<float*>(&temp);
+
+    temp = 0;
+    temp |= static_cast<uint32_t>(!!(in & (1ull << 21))) << 31;                             // sign of Y
+    temp |= ((((0xe0ul)*!!(in & (1ull << 20)) | ((in >> 16)& 0x1full)) + 127)&0xff) << 23;  // exponent of Y
+    temp |= (0xff*roundingBit) | (((in >> 1) & 0x7fffull) << 8);                            // mantissa of Y
+    vec.z = *reinterpret_cast<float*>(&temp);
 }
 
 // ---------------------- //

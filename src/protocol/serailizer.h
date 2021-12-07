@@ -68,7 +68,7 @@ struct Serializer {
 
     template<typename T>
     static void serialize(const std::vector<T>& list,std::vector<uint8_t>& to) {
-        serialize(list.size(), to);
+        serialize(static_cast<uint64_t>(list.size()), to);
 
         for (const auto& element : list)
             serialize(element, to);        
