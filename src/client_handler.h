@@ -18,21 +18,19 @@ struct TankProtocolHandler : public WebsockClientHandler {
     void onBinaryMessage(const std::vector<uint8_t>& data) override;
     void onDisconnect() override;
 
-    template<PacketOpcode opcode>
-    static void sendToAll(const BasePacket<opcode>& pkt) {
-        sendToAll(pkt);
-    }
+    static void sendToAll(const Serializable& ser);
 
     private:
         template<typename T>
         T* deserializePacket(void* mem, const std::vector<uint8_t>& data) {
             auto res = new (mem) T;
-            res->deserialize(data);
+            VectorStream vs{data};
+            vs.get();
+            res->deserialize(vs);
             return res;
         }
 
         static std::set<TankProtocolHandler*> mAllClients;
-        static void sendToAll(const Serializable& ser);
 };
 
 #endif

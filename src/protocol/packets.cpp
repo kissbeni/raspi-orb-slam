@@ -1,29 +1,9 @@
 
 #include "packets.h"
-#include "serailizer.h"
-
-std::vector<uint8_t> PingPacket::serialize() const {
-    _SERIALIZE_BEGIN
-    _SERIALIZE_FIELD(mData)
-    _SERIALIZE_RETURN
-}
-void PingPacket::deserialize(VectorStream& from) {
-    _DESERIALIZE_FIELD(mData)
-}
-
-
-std::vector<uint8_t> PongPacket::serialize() const {
-    _SERIALIZE_BEGIN
-    _SERIALIZE_FIELD(mData)
-    _SERIALIZE_RETURN
-}
-void PongPacket::deserialize(VectorStream& from) {
-    _DESERIALIZE_FIELD(mData)
-}
-
+#include "serializer.h"
 
 std::vector<uint8_t> MovePacket::serialize() const {
-    _SERIALIZE_BEGIN
+    _SERIALIZE_BEGIN_OPC
     _SERIALIZE_FIELD(mLeftSpeed)
     _SERIALIZE_FIELD(mRightSpeed)
     _SERIALIZE_RETURN
@@ -34,7 +14,7 @@ void MovePacket::deserialize(VectorStream& from) {
 }
 
 std::vector<uint8_t> StopPacket::serialize() const {
-    _SERIALIZE_BEGIN
+    _SERIALIZE_BEGIN_OPC
     _SERIALIZE_RETURN
 }
 void StopPacket::deserialize(VectorStream& from) {}
@@ -57,7 +37,7 @@ void LedColor::deserialize(VectorStream& from) {
 
 
 std::vector<uint8_t> LedsPacket::serialize() const {
-    _SERIALIZE_BEGIN
+    _SERIALIZE_BEGIN_OPC
     _SERIALIZE_FIELD(mLeds)
     _SERIALIZE_RETURN
 }
@@ -66,15 +46,58 @@ void LedsPacket::deserialize(VectorStream& from) {
 }
 
 
-std::vector<uint8_t> ReportPacket::serialize() const {
+OverlayPoint::OverlayPoint(uint16_t x, uint16_t y, uint8_t f)
+    : mX{x}, mY{y}, mFlags{f} {}
+
+std::vector<uint8_t> OverlayPoint::serialize() const {
     _SERIALIZE_BEGIN
-    _SERIALIZE_FIELD(mFps)
+    _SERIALIZE_FIELD(mX)
+    _SERIALIZE_FIELD(mY)
+    _SERIALIZE_FIELD(mFlags)
+    _SERIALIZE_RETURN
+}
+void OverlayPoint::deserialize(VectorStream& from) {
+    _DESERIALIZE_FIELD(mX)
+    _DESERIALIZE_FIELD(mY)
+    _DESERIALIZE_FIELD(mFlags)
+}
+
+
+std::vector<uint8_t> ReportPacket::serialize() const {
+    _SERIALIZE_BEGIN_OPC
     _SERIALIZE_FIELD(mOverlay)
     _SERIALIZE_FIELD(mWorldPoints)
     _SERIALIZE_RETURN
 }
 void ReportPacket::deserialize(VectorStream& from) {
-    _DESERIALIZE_FIELD(mFps)
     _DESERIALIZE_FIELD(mOverlay)
     _DESERIALIZE_FIELD(mWorldPoints)
+}
+
+
+std::vector<uint8_t> PathPacket::serialize() const {
+    _SERIALIZE_BEGIN_OPC
+    _SERIALIZE_FIELD(mCurrentCameraPos)
+    _SERIALIZE_FIELD(mIndex)
+    _SERIALIZE_RETURN
+}
+void PathPacket::deserialize(VectorStream& from) {
+    _DESERIALIZE_FIELD(mCurrentCameraPos)
+    _DESERIALIZE_FIELD(mIndex)
+}
+
+
+std::vector<uint8_t> MetricsPacket::serialize() const {
+    _SERIALIZE_BEGIN_OPC
+    _SERIALIZE_FIELD(mFps)
+    _SERIALIZE_FIELD(mCpuUsage)
+    _SERIALIZE_FIELD(mMemUsage)
+    _SERIALIZE_FIELD(mTrackingState)
+    _SERIALIZE_RETURN
+}
+void MetricsPacket::deserialize(VectorStream& from) {
+    _DESERIALIZE_FIELD(mFps)
+    _DESERIALIZE_FIELD(mCpuUsage)
+    _DESERIALIZE_FIELD(mMemUsage)
+    _DESERIALIZE_FIELD(mTrackingState)
 }

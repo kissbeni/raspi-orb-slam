@@ -11,6 +11,10 @@
 #define _SERIALIZE_BEGIN \
     std::vector<uint8_t> __result;
 
+#define _SERIALIZE_BEGIN_OPC \
+    std::vector<uint8_t> __result; \
+    __result.push_back(getOpcode());
+
 #define _SERIALIZE_FIELD(fieldRef) \
     Serializer::serialize(fieldRef, __result);
 
@@ -38,6 +42,9 @@ struct Serializer {
     static void serialize(uint64_t num, std::vector<uint8_t>& to);
     static void deserialize(uint64_t& num, VectorStream& from);
 
+    static void serialize(uint16_t num, std::vector<uint8_t>& to);
+    static void deserialize(uint16_t& num, VectorStream& from);
+
     static void serialize(const std::string& str, std::vector<uint8_t>& to);
     static void deserialize(std::string& str, VectorStream& from);
 
@@ -49,6 +56,15 @@ struct Serializer {
 
     static void serialize(const vec3 vec, std::vector<uint8_t>& to);
     static void deserialize(vec3& vec, VectorStream& from);
+
+    template<typename T, typename Chk = typename enable_if_serializer<T>::type>
+    static void serialize(const T& obj, std::vector<uint8_t>& to) {
+        serialize(&obj, to);
+    }
+    template<typename T, typename Chk = typename enable_if_deserializer<T>::type>
+    static void deserialize(T& obj, VectorStream& from) {
+        deserialize(&obj, from);
+    }
 
     private:
     static void serialize(const Serializable* obj, std::vector<uint8_t>& to);

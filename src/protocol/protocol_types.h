@@ -17,14 +17,12 @@ struct vec2 {
 };
 
 enum PacketOpcode : uint8_t {
-  PING = 0, // Echo request
-  PONG = 1, // Echo response
-  MOVE = 2, // Movement with speed
-  STOP = 3, // Immediate stop
-  MODE = 4, // ?
-  LEDS = 5, // Update LED colors
-  STAT = 6, // System statistics
-  PPUD = 7, // Path and point update
+  MOVE = 1, // Movement with speed
+  STOP = 2, // Immediate stop
+  LEDS = 3, // Update LED colors
+  STAT = 4, // System statistics
+  OPUD = 5, // Overlay and point update
+  CPUD = 6, // Camera path update
 };
 
 struct Serializable {

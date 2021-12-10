@@ -1,7 +1,7 @@
 
 #include <stdexcept>
 
-#include "serailizer.h"
+#include "serializer.h"
 
 // ----------------------- //
 //  Boolean serialization  //
@@ -67,6 +67,17 @@ void Serializer::deserialize(uint64_t& num, VectorStream& from) {
         num |= (b & 0x7F) << shift;
         shift += 7;
     } while ((b & 0x80) != 0);
+}
+
+/*static*/
+void Serializer::serialize(uint16_t num, std::vector<uint8_t>& to) {
+    serialize(static_cast<uint64_t>(num) & 0xFFFFull, to);
+}
+/*static*/
+void Serializer::deserialize(uint16_t& num, VectorStream& from) {
+    uint64_t tmp;
+    deserialize(tmp, from);
+    num = static_cast<uint16_t>(tmp);
 }
 
 // ---------------------- //
