@@ -1,0 +1,4 @@
+*.o
+KeyFrameTrajectory.txt
+mono_raspi
+perf.*
