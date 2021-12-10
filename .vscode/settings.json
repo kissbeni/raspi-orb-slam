@@ -77,5 +77,6 @@
         "valarray": "cpp",
         "variant": "cpp",
         "regex": "cpp"
-    }
+    },
+    "cmake.configureOnOpen": false
 }
