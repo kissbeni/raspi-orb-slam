@@ -56,9 +56,10 @@ size_t cameraBufferSize, captureBufferSize;
 uint8_t *cameraBuffers[CAPTURE_BUFFER_COUNT], *tempCameraBuffer;
 volatile size_t currentCameraBuffer;
 
-std::mutex           worldPosListMutex;
+std::mutex           slamMutex;
 std::vector<cv::Mat> worldPosList;
 ReportPacket reportPacket;
+MetricsPacket metricsPacket;
 
 Semaphore nextFrameSignal(1);
 Semaphore frameAvailableSignal(1);
@@ -127,6 +128,54 @@ namespace packetHandlers {
     }
 }
 
+// https://rosettacode.org/wiki/Linux_CPU_utilization 
+float getCpuUtilization() {
+    static size_t previous_idle_time = 0, previous_total_time = 0;
+    
+    std::ifstream proc_stat("/proc/stat");
+    proc_stat.ignore(5, ' '); // Skip the 'cpu' prefix.
+    std::vector<size_t> times;
+    for (size_t time; proc_stat >> time; times.push_back(time));
+
+    if (times.size() < 4)
+        return 0;
+    
+    size_t idle_time = times[3];
+    size_t total_time = std::accumulate(times.begin(), times.end(), 0);
+
+    const float idle_time_delta = idle_time - previous_idle_time;
+    const float total_time_delta = total_time - previous_total_time;
+    return (1.0f - idle_time_delta / total_time_delta) * 100.0f;
+}
+
+size_t getTotalSystemMemory() {
+    return sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGE_SIZE);
+}
+
+float getMemUtilization() {
+    static size_t totalMemory = getTotalSystemMemory() / 1024;
+    static constexpr size_t pos = strlen("MemAvailable: ");
+
+    std::ifstream fis{"/proc/meminfo"};
+    std::string line;
+    while (getline(fis, line)) {
+        if (line.find("MemAvailable:", 0) == 0) {
+            line = line.substr(pos, line.rfind(" ") - pos);
+            size_t avail = std::stoll(line);
+            //std::cout << "max:" << totalMemory << ",avail" << avail << std::endl;
+            return (1.0f - (((float)avail)/totalMemory)) * 100.0f;
+        }
+    }
+
+    return 0;
+}
+
+vec3 openCvToVec3(const cv::Mat& m) {
+    return {m.at<float>(0), m.at<float>(1), m.at<float>(2)};
+}
+
+volatile bool gShutdownFlag = false;
+
 int main(int argc, char **argv)
 {
     puts("Hello!");
@@ -136,6 +185,32 @@ int main(int argc, char **argv)
         std::cerr << "Usage: ./mono_raspi path_to_vocabulary path_to_settings" << std::endl;
         return 1;
     }
+
+    CameraStreamer stream;
+
+    gHttpServer.when("/")->serveFile("index.html");
+    gHttpServer.when("/video.mjpeg")->requested([&stream](const HttpRequest& req) {
+        HttpResponse res{200};
+        res["Age"] = "0";
+        res["Cache-Control"] = "no-cache, private";
+        res["Pragma"] = "no-cache";
+        res["Content-Type"] = "multipart/x-mixed-replace;boundary=FRAME";
+
+        res.setContent(createCameraData());
+        res["Content-Length"] = "";
+
+        res.requestProtocolHandover(&stream);
+        return res;
+    });
+    gHttpServer.when("/SHUTDOWN!")->posted([](const HttpRequest& req) { 
+        puts("Got shutdown request");
+        gShutdownFlag = true;
+        return HttpResponse{200};
+    });
+
+    gHttpServer.websocket("/ws")->handleWith<TankProtocolHandler>();
+
+    std::thread t3{[]() { gHttpServer.startListening(4000); }};
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
     ORB_SLAM2::System SLAM(argv[1], argv[2], ORB_SLAM2::System::MONOCULAR, true);
@@ -167,61 +242,10 @@ int main(int argc, char **argv)
 
     puts("Opened serial communication");
 
-    CameraStreamer stream;
-
-    gHttpServer.when("/")->serveFile("index.html");
-    /*gHttpServer.when("/frontlamps/on")->posted([](const HttpRequest& req) {
-        for (int i = 4; i < 8; i++)
-            gTankSerial.setLedColor(i, 255, 255, 255);
-        return HttpResponse{200};
-    });
-    gHttpServer.when("/frontlamps/off")->posted([](const HttpRequest& req) {
-        for (int i = 4; i < 8; i++)
-            gTankSerial.clearLed(i);
-        return HttpResponse{200};
-    });
-    gHttpServer.when("/stats")->requested([](const HttpRequest& req) {
-        std::stringstream ss;
-        ss.precision(6);
-        ss << "{\"points\":[";
-        bool flag = false;
-        {
-            std::unique_lock<std::mutex> lock{worldPosListMutex};
-            for (auto& x : worldPosList) {
-                if (flag) ss << ","; else flag = true;
-                ss << "[" << std::fixed << x.at<float>(0) << "," << x.at<float>(1) << "," << x.at<float>(2) << "]";
-            }
-            ss << "],\"overlay\":[";
-            flag = false;
-            for (auto& x : overlayPosList) {
-                if (flag) ss << ","; else flag = true;
-                ss << "{\"x\":" << std::fixed << x.x << ",\"y\":" << x.y << ",\"f\":" << ((int)x.flags) << "}";
-            }
-        }
-
-        ss << "],\"fps\":" << std::fixed << currentFPS << "}";
-        return HttpResponse{200, "application/json", ss.str()};
-    });*/
-    gHttpServer.when("/video.mjpeg")->requested([&stream](const HttpRequest& req) {
-        HttpResponse res{200};
-        res["Age"] = "0";
-        res["Cache-Control"] = "no-cache, private";
-        res["Pragma"] = "no-cache";
-        res["Content-Type"] = "multipart/x-mixed-replace;boundary=FRAME";
-
-        res.setContent(createCameraData());
-        res["Content-Length"] = "";
-
-        res.requestProtocolHandover(&stream);
-        return res;
-    });
-
-    gHttpServer.websocket("/ws")->handleWith<TankProtocolHandler>();
-
     std::thread t([]() {
         uint8_t last_lspeed = 0, last_rspeed = 0;
 
-        while (true) {
+        while (!gShutdownFlag) {
             if (last_lspeed != lspeed || last_rspeed != rspeed) {
                 last_lspeed = lspeed;
                 last_rspeed = rspeed;
@@ -251,8 +275,7 @@ int main(int argc, char **argv)
     uint64_t prev_frame = 0;
 
     std::thread t2{cameraThread};
-    std::thread t3{[]() { gHttpServer.startListening(4000); }};
-
+    
     camera.grab();
 
     usleep(2000000);
@@ -260,75 +283,101 @@ int main(int argc, char **argv)
 
     uint64_t lastWorldSave = 0;
 
+    size_t prevKeyframeIndex = 1;
+
+    PathPacket pathPacket;
+
+    ORB_SLAM2::System *SLAMptr = &SLAM;
+
+    std::thread networkPushThread([SLAMptr]() {
+        while (!gShutdownFlag) {
+            //std::cout << "Updating point list" << std::endl;
+            reportPacket.mWorldPoints.clear();
+            for (auto& p : SLAMptr->GetTrackedMapPoints()) {
+                if (!p) continue;
+                //std::cout << ((void*)p) << std::endl;
+                const auto& pos = p->GetWorldPos();
+                reportPacket.mWorldPoints.push_back(openCvToVec3(pos));
+            }
+            //overlayPosList = SLAMptr->GetTrackedKeyPointsUn();
+            reportPacket.mOverlay.clear();
+            if (SLAMptr->mpTracker->mLastProcessedState == ORB_SLAM2::Tracking::OK) {
+                slamMutex.lock();
+                auto keys = SLAMptr->mpTracker->mCurrentFrame.mvKeys;
+                slamMutex.unlock();
+                reportPacket.mOverlay.resize(keys.size());
+                for (size_t i = 0; i < keys.size(); i++) {
+                    auto& k = keys[i];
+                    auto& p = SLAMptr->mpTracker->mCurrentFrame.mvpMapPoints[i];
+
+                    auto& overlay = reportPacket.mOverlay[i];
+                    overlay.mX = k.pt.x;
+                    overlay.mY = k.pt.y;
+                    overlay.mFlags = 0;
+
+                    if (!p) continue;
+
+                    overlay.mFlags |= 1;
+
+                    if (!SLAMptr->mpTracker->mCurrentFrame.mvbOutlier[i])
+                    {
+                        overlay.mFlags |= 2;
+
+                        if (p->Observations() > 0)
+                            overlay.mFlags |= 4;
+                    }
+                }
+            }
+
+            metricsPacket.mTrackingState = SLAMptr->mpTracker->mLastProcessedState;
+            metricsPacket.mCpuUsage = getCpuUtilization();
+            metricsPacket.mMemUsage = getMemUtilization();
+
+            TankProtocolHandler::sendToAll(reportPacket);
+            TankProtocolHandler::sendToAll(metricsPacket);
+
+            usleep(500000);
+        }
+    });
+
     // Main loop
-    while (true)
+    while (!gShutdownFlag)
     {
         uint64_t tframe = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
-        //std::chrono::steady_clock::time_point grab1 = std::chrono::steady_clock::now();
+        std::chrono::steady_clock::time_point grab1 = std::chrono::steady_clock::now();
 
         /*camera.grab();
         camera.retrieve(im.data, raspicam::RASPICAM_FORMAT_IGNORE);*/
         memcpy(im.data, getCameraBuffer(), cameraBufferSize);
         swapCameraBuffers();
 
-        //double tgrab = std::chrono::duration_cast<std::chrono::duration<double> >(std::chrono::steady_clock::now() - grab1).count();
+        double tgrab = std::chrono::duration_cast<std::chrono::duration<double> >(std::chrono::steady_clock::now() - grab1).count();
 
-        //std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+        std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
 
         // Pass the image to the SLAM system
-        SLAM.TrackMonocular(im, tframe);
-
-        if ((tframe - lastWorldSave) > 500000) {
-            //std::cout << "Updating point list" << std::endl;
-            std::unique_lock<std::mutex> lock{worldPosListMutex};
-            reportPacket.mWorldPoints.clear();
-            for (auto& p : SLAM.GetTrackedMapPoints()) {
-                if (!p) continue;
-                //std::cout << ((void*)p) << std::endl;
-                const auto& pos = p->GetWorldPos();
-                reportPacket.mWorldPoints.push_back({pos.at<float>(0), pos.at<float>(1), pos.at<float>(2)});
-            }
-            //overlayPosList = SLAM.GetTrackedKeyPointsUn();
-            reportPacket.mOverlay.clear();
-            if (SLAM.mpTracker->mLastProcessedState == ORB_SLAM2::Tracking::OK) {
-                auto keys = SLAM.mpTracker->mCurrentFrame.mvKeys;
-                reportPacket.mOverlay.resize(keys.size());
-                for (size_t i = 0; i < keys.size(); i++) {
-                    auto& k = keys[i];
-                    auto& p = SLAM.mpTracker->mCurrentFrame.mvpMapPoints[i];
-
-                    auto& overlay = reportPacket.mOverlay[i];
-                    overlay.x = k.pt.x;
-                    overlay.y = k.pt.y;
-                    overlay.flags = 0;
-
-                    if (!p) continue;
-
-                    overlay.flags |= 1;
-
-                    if (!SLAM.mpTracker->mCurrentFrame.mvbOutlier[i])
-                    {
-                        overlay.flags |= 2;
-
-                        if (p->Observations() > 0)
-                            overlay.flags |= 4;
-                    }
-                }
-            }
-
-            TankProtocolHandler::sendToAll(reportPacket);
-
-            lastWorldSave = tframe;
+        {
+            std::unique_lock<std::mutex> lock{slamMutex};
+            SLAM.TrackMonocular(im, tframe);
         }
 
-        //std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
+        const auto& kfs = SLAM.mpMap->GetAllKeyFrames();
+        for (;prevKeyframeIndex < kfs.size(); ++prevKeyframeIndex) {
+            const auto kf = kfs[prevKeyframeIndex];
+            if (!kf || kf->isBad()) continue;
+            pathPacket.mIndex = prevKeyframeIndex;
+            pathPacket.mCurrentCameraPos = openCvToVec3(kf->GetCameraCenter());
+            TankProtocolHandler::sendToAll(pathPacket);
+        }
 
-        //double ttrack = std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
-        //double ttotal = (tframe - prev_frame) / 1000000.0;
+        std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
 
-        reportPacket.mFps = 1.0f/((tframe-prev_frame) / 1000000.0f);
-        //printf("grab time: %.04lf, track time: %.04lf, frame time: %llu, total: %.04lf, fps: %.1f\n", tgrab, ttrack, tframe, ttotal, 1.0/((tframe-prev_frame) / 1000000.0));
+        double ttrack = std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
+        double ttotal = (tframe - prev_frame) / 1000000.0;
+
+        metricsPacket.mFps = 1.0f/((tframe-prev_frame) / 1000000.0f);
+        printf("grab time: %.04lf, track time: %.04lf, frame time: %llu, total: %.04lf, fps: %.1f\n", tgrab, ttrack, tframe, ttotal, 1.0/((tframe-prev_frame) / 1000000.0));
         prev_frame = tframe;
         // usleep(66666); // 15 fps
         // usleep(40000); // 25 fps
