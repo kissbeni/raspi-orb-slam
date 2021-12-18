@@ -24,6 +24,8 @@
 #define CAPTURE_HEIGHT (480)
 #define CAPTURE_FORMAT raspicam::RASPICAM_FORMAT_GRAY
 
+volatile bool gShutdownFlag = false;
+
 class Semaphore {
     public:
         Semaphore(int count = 0, int max = 1) : mCount{count}, mMax{max} {}
@@ -65,7 +67,8 @@ Semaphore nextFrameSignal(1);
 Semaphore frameAvailableSignal(1);
 
 void cameraThread() {
-    while (true) {
+    puts("Camera thread started");
+    while (!gShutdownFlag) {
         nextFrameSignal.wait();
 
         camera.grab();
@@ -74,6 +77,7 @@ void cameraThread() {
         memcpy(cameraBuffers[(currentCameraBuffer+1)%2], tempCameraBuffer, cameraBufferSize);
         frameAvailableSignal.notify();
     }
+    puts("Camera thread finished");
 }
 
 void swapCameraBuffers() {
@@ -102,12 +106,12 @@ std::string createCameraData() {
 
 struct CameraStreamer : public ICanRequestProtocolHandover {
     void acceptHandover(short& serverSock, IClientStream& client, std::unique_ptr<HttpRequest>) {
-        while (serverSock > 0 && client.isOpen()) {
+        while (serverSock > 0 && client.isOpen() && !gShutdownFlag) {
             auto content = createCameraData();
 
             client.send(content.data(), content.length());
 
-            usleep(1000000/20);
+            usleep(1000000/30);
         }
     }
 };
@@ -174,7 +178,29 @@ vec3 openCvToVec3(const cv::Mat& m) {
     return {m.at<float>(0), m.at<float>(1), m.at<float>(2)};
 }
 
-volatile bool gShutdownFlag = false;
+void testCameraCaptureSpeed() {
+    usleep(100000);
+
+    printf("Testing camera capture speed...");
+    fflush(stdout);
+
+    size_t frameCount = camera.getFrameRate() * 2; // Test for at least 2 seconds
+
+    double duration, times = 0;
+
+    for (int i = 0; i < frameCount; i++) {
+        fflush(stdout);
+        std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+        getCameraBuffer();
+        swapCameraBuffers();
+        std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
+        times += duration;
+        printf("\rTesting camera capture speed... %3d/%lu (%2.08lf FPS)   ", i + 1, frameCount, 1/duration);
+    }
+
+    printf("\rTesting camera capture speed... %.08lf FPS (requested %d FPS)\n", 1.0f/(times / frameCount), camera.getFrameRate());
+}
 
 int main(int argc, char **argv)
 {
@@ -185,6 +211,54 @@ int main(int argc, char **argv)
         std::cerr << "Usage: ./mono_raspi path_to_vocabulary path_to_settings" << std::endl;
         return 1;
     }
+
+    cout << endl << "-------" << endl;
+    std::cout << "Initializing components..." << std::endl;
+
+    int cols = CAPTURE_WIDTH;
+    int rows = CAPTURE_HEIGHT;
+
+    std::cout << "Setting up camera (" << cols << "x" << rows << ")" << std::endl;
+
+    cv::Mat im(rows, cols, CV_8UC1);
+
+    std::cout << " OpenCV image matrix: channels=" << im.channels() << ",elemSize=" << im.elemSize() << ",total=" << im.total() << ",storedAt=" << ((void*)im.data) << std::endl;
+    memset(im.data, 0, im.total());
+
+    camera.setFormat(CAPTURE_FORMAT);
+    camera.setCaptureSize(cols, rows);
+    camera.setFrameRate(40);
+    camera.setISO(600);
+
+    if (!camera.open()) {
+        puts("Could not open the camera");
+        return 1;
+    }
+
+    puts("Opened camera :)");
+
+    camera.grab();
+    captureBufferSize = camera.getImageTypeSize(CAPTURE_FORMAT);
+    cameraBufferSize = captureBufferSize;
+
+    std::cout << "We need " << cameraBufferSize << " bytes to hold a frame" << std::endl;
+
+    for (int i = 0; i < CAPTURE_BUFFER_COUNT; i++) {
+        cameraBuffers[i] = new uint8_t[cameraBufferSize];
+        std::cout << "    Allocated circular camera buffer part #" << i << " at " << ((void*)cameraBuffers[i]) << std::endl;
+    }
+
+    tempCameraBuffer = new uint8_t[captureBufferSize];
+    std::cout << "    Allocated temporay frame buffer at " << ((void*)tempCameraBuffer) << " of size " << captureBufferSize << std::endl;
+
+    std::thread t2{cameraThread};
+
+    testCameraCaptureSpeed();
+
+    if (!gTankSerial.open())
+        return 2;
+
+    puts("Opened serial communication");
 
     CameraStreamer stream;
 
@@ -212,36 +286,6 @@ int main(int argc, char **argv)
 
     std::thread t3{[]() { gHttpServer.startListening(4000); }};
 
-    // Create SLAM system. It initializes all system threads and gets ready to process frames.
-    ORB_SLAM2::System SLAM(argv[1], argv[2], ORB_SLAM2::System::MONOCULAR, true);
-
-    cout << endl << "-------" << endl;
-    std::cout << "Initializing components..." << std::endl;
-
-    int cols = CAPTURE_WIDTH;
-    int rows = CAPTURE_HEIGHT;
-
-    std::cout << "Setting up camera (" << cols << "x" << rows << ")" << std::endl;
-
-    cv::Mat im(rows, cols, CV_8UC1);
-
-    std::cout << " OpenCV image matrix: channels=" << im.channels() << ",elemSize=" << im.elemSize() << ",total=" << im.total() << ",storedAt=" << ((void*)im.data) << std::endl;
-    memset(im.data, 0, im.total());
-
-    camera.setFormat(CAPTURE_FORMAT);
-    camera.setCaptureSize(cols, rows);
-    camera.setISO(600);
-
-    if (!camera.open()) {
-        puts("Could not open the camera");
-        return 1;
-    }
-
-    if (!gTankSerial.open())
-        return 2;
-
-    puts("Opened serial communication");
-
     std::thread t([]() {
         uint8_t last_lspeed = 0, last_rspeed = 0;
 
@@ -258,38 +302,22 @@ int main(int argc, char **argv)
         }
     });
 
-    camera.grab();
-    captureBufferSize = camera.getImageTypeSize(CAPTURE_FORMAT);
-    cameraBufferSize = captureBufferSize;
-
-    std::cout << "We need " << cameraBufferSize << " bytes to hold a frame" << std::endl;
-
-    for (int i = 0; i < CAPTURE_BUFFER_COUNT; i++) {
-        cameraBuffers[i] = new uint8_t[cameraBufferSize];
-        std::cout << "    Allocated circular camera buffer part #" << i << " at " << ((void*)cameraBuffers[i]) << std::endl;
-    }
-
-    tempCameraBuffer = new uint8_t[captureBufferSize];
-    std::cout << "    Allocated temporay frame buffer at " << ((void*)tempCameraBuffer) << " of size " << captureBufferSize << std::endl;
-
     uint64_t prev_frame = 0;
 
-    std::thread t2{cameraThread};
-    
-    camera.grab();
+    // Create SLAM system. It initializes all system threads and gets ready to process frames.
+    ORB_SLAM2::System SLAM(argv[1], argv[2], ORB_SLAM2::System::MONOCULAR, true);
 
     usleep(2000000);
     std::cout << "Starting main loop" << std::endl;
 
     uint64_t lastWorldSave = 0;
 
-    size_t prevKeyframeIndex = 1;
-
-    PathPacket pathPacket;
-
     ORB_SLAM2::System *SLAMptr = &SLAM;
 
     std::thread networkPushThread([SLAMptr]() {
+        size_t prevKeyframeIndex = 1;
+        PathPacket pathPacket;
+
         while (!gShutdownFlag) {
             //std::cout << "Updating point list" << std::endl;
             reportPacket.mWorldPoints.clear();
@@ -303,12 +331,12 @@ int main(int argc, char **argv)
             reportPacket.mOverlay.clear();
             if (SLAMptr->mpTracker->mLastProcessedState == ORB_SLAM2::Tracking::OK) {
                 slamMutex.lock();
-                auto keys = SLAMptr->mpTracker->mCurrentFrame.mvKeys;
+                auto keys = SLAMptr->mpTracker->mLastProcessedFrame.mvKeys;
                 slamMutex.unlock();
                 reportPacket.mOverlay.resize(keys.size());
                 for (size_t i = 0; i < keys.size(); i++) {
                     auto& k = keys[i];
-                    auto& p = SLAMptr->mpTracker->mCurrentFrame.mvpMapPoints[i];
+                    auto& p = SLAMptr->mpTracker->mLastProcessedFrame.mvpMapPoints[i];
 
                     auto& overlay = reportPacket.mOverlay[i];
                     overlay.mX = k.pt.x;
@@ -336,9 +364,20 @@ int main(int argc, char **argv)
             TankProtocolHandler::sendToAll(reportPacket);
             TankProtocolHandler::sendToAll(metricsPacket);
 
+            const auto& kfs = SLAMptr->mpMap->GetAllKeyFrames();
+            for (;prevKeyframeIndex < kfs.size(); ++prevKeyframeIndex) {
+                const auto kf = kfs[prevKeyframeIndex];
+                if (!kf || kf->isBad()) continue;
+                pathPacket.mIndex = prevKeyframeIndex;
+                pathPacket.mCurrentCameraPos = openCvToVec3(kf->GetCameraCenter());
+                TankProtocolHandler::sendToAll(pathPacket);
+            }
+
             usleep(500000);
         }
     });
+
+    puts("\n\n");
 
     // Main loop
     while (!gShutdownFlag)
@@ -362,22 +401,13 @@ int main(int argc, char **argv)
             SLAM.TrackMonocular(im, tframe);
         }
 
-        const auto& kfs = SLAM.mpMap->GetAllKeyFrames();
-        for (;prevKeyframeIndex < kfs.size(); ++prevKeyframeIndex) {
-            const auto kf = kfs[prevKeyframeIndex];
-            if (!kf || kf->isBad()) continue;
-            pathPacket.mIndex = prevKeyframeIndex;
-            pathPacket.mCurrentCameraPos = openCvToVec3(kf->GetCameraCenter());
-            TankProtocolHandler::sendToAll(pathPacket);
-        }
-
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
 
         double ttrack = std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
         double ttotal = (tframe - prev_frame) / 1000000.0;
 
         metricsPacket.mFps = 1.0f/((tframe-prev_frame) / 1000000.0f);
-        printf("grab time: %.04lf, track time: %.04lf, frame time: %llu, total: %.04lf, fps: %.1f\n", tgrab, ttrack, tframe, ttotal, 1.0/((tframe-prev_frame) / 1000000.0));
+        //printf("grab time: %.04lf, track time: %.04lf, frame time: %llu, total: %.04lf, fps: %.1f\n", tgrab, ttrack, tframe, ttotal, 1.0/((tframe-prev_frame) / 1000000.0));
         prev_frame = tframe;
         // usleep(66666); // 15 fps
         // usleep(40000); // 25 fps
