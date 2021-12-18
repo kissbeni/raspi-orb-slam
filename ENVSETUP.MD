@@ -151,10 +151,10 @@ If you have hidden your SSID you will have to add `scan_ssid=1` as well.
 Install dependencies:
 
 ```bash
-sudo apt install gcc g++ clang make cmake git flex bison linux-tools raspberrypi-kernel-headers libeigen3-dev libopengl-dev libglx-dev libgl-dev libglew-dev minicom
+sudo apt install gcc g++ clang make cmake git flex bison linux-tools raspberrypi-kernel-headers libeigen3-dev minicom libdw-dev libunwind-dev systemtap-sdt-dev libaudit-dev binutils-dev
 ```
 
-This project requies OpenCV 3.x, Eigen3.1, Pangolin and raspicam, you can
+This project requies OpenCV 3.x, Eigen3.1 and raspicam, you can
 download the source and compile it like this:
 
 ```bash
@@ -170,16 +170,6 @@ sudo make install
 cd ~
 git clone https://gitlab.com/libeigen/eigen/ -b 3.1
 cd eigen
-mkdir build
-cd build
-cmake -D CMAKE_BUILD_TYPE=RELEASE ../
-make -j4
-sudo make install
-
-cd ~
-git clone https://github.com/stevenlovegrove/Pangolin
-cd Pangolin
-git checkout a5ed219a3bf70f866545f5db7f1eb47616f3c050
 mkdir build
 cd build
 cmake -D CMAKE_BUILD_TYPE=RELEASE ../
