@@ -1,7 +1,7 @@
 
 CXX=g++
-CXXFLAGS=--std=c++17 -g -ggdb -fno-omit-frame-pointer -O0 -IORB_SLAM2/include/ -IORB_SLAM2/ -Itinyhttp -I/usr/include/eigen3 -Wno-deprecated-declarations -DCOMPILEDWITHC11 -IMiniJson/Source/include/ -Itinyhttp/htcc/
-LDFLAGS=-L/usr/local/lib -lORB_SLAM2 `pkg-config --libs opencv` -lraspicam -lpthread
+CXXFLAGS=--std=c++17 -g -ggdb -O0 -IORB_SLAM2/include/ -IORB_SLAM2/ -Itinyhttp -I/usr/include/eigen3 -Wno-deprecated-declarations -DCOMPILEDWITHC11 -IMiniJson/Source/include/ -Itinyhttp/htcc/
+LDFLAGS=-g -ggdb -O0 -L/usr/local/lib -lORB_SLAM2 `pkg-config --libs opencv` -lraspicam -lpthread
 
 OBJS = \
 	src/tankserial.o 					\
