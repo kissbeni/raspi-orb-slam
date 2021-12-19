@@ -56,6 +56,7 @@ raspicam::RaspiCam camera;
 size_t cameraBufferSize, captureBufferSize;
 
 uint8_t *cameraBuffers[CAPTURE_BUFFER_COUNT], *tempCameraBuffer;
+uint64_t cameraBufferTimes[CAPTURE_BUFFER_COUNT];
 volatile size_t currentCameraBuffer;
 
 std::mutex           slamMutex;
@@ -70,24 +71,31 @@ void cameraThread() {
     puts("Camera thread started");
     while (!gShutdownFlag) {
         nextFrameSignal.wait();
-
+        
         camera.grab();
+        uint64_t t_img = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         camera.retrieve(tempCameraBuffer, raspicam::RASPICAM_FORMAT_IGNORE);
 
-        memcpy(cameraBuffers[(currentCameraBuffer+1)%2], tempCameraBuffer, cameraBufferSize);
+        memcpy(cameraBuffers[(currentCameraBuffer+1)%CAPTURE_BUFFER_COUNT], tempCameraBuffer, cameraBufferSize);
+        cameraBufferTimes[(currentCameraBuffer+1)%CAPTURE_BUFFER_COUNT] = t_img;
         frameAvailableSignal.notify();
     }
     puts("Camera thread finished");
 }
 
 void swapCameraBuffers() {
-    currentCameraBuffer = (currentCameraBuffer + 1) % 2;
+    currentCameraBuffer = (currentCameraBuffer + 1) % CAPTURE_BUFFER_COUNT;
     nextFrameSignal.notify();
 }
 
-const uint8_t* getCameraBuffer() {
+struct camera_buffer_res {
+    uint8_t* imData;
+    uint64_t timestamp;
+};
+
+camera_buffer_res getCameraBuffer() {
     frameAvailableSignal.wait();
-    return cameraBuffers[currentCameraBuffer];
+    return { cameraBuffers[currentCameraBuffer], cameraBufferTimes[currentCameraBuffer] };
 }
 
 std::string createCameraData() {
@@ -286,7 +294,7 @@ int main(int argc, char **argv)
 
     std::thread t3{[]() { gHttpServer.startListening(4000); }};
 
-    std::thread t([]() {
+    /*std::thread t([]() {
         uint8_t last_lspeed = 0, last_rspeed = 0;
 
         while (!gShutdownFlag) {
@@ -300,7 +308,7 @@ int main(int argc, char **argv)
 
             usleep(100000);
         }
-    });
+    });*/
 
     uint64_t prev_frame = 0;
 
@@ -347,7 +355,7 @@ int main(int argc, char **argv)
 
                     overlay.mFlags |= 1;
 
-                    if (!SLAMptr->mpTracker->mCurrentFrame.mvbOutlier[i])
+                    if (!SLAMptr->mpTracker->mLastProcessedFrame.mvbOutlier[i])
                     {
                         overlay.mFlags |= 2;
 
@@ -377,6 +385,12 @@ int main(int argc, char **argv)
         }
     });
 
+    std::thread slam_track_thread([SLAMptr]() {
+        while (!gShutdownFlag) {
+            SLAMptr->mpTracker->PollCurrentFrame();
+        }
+    });
+
     puts("\n\n");
 
     // Main loop
@@ -386,9 +400,10 @@ int main(int argc, char **argv)
 
         std::chrono::steady_clock::time_point grab1 = std::chrono::steady_clock::now();
 
-        /*camera.grab();
-        camera.retrieve(im.data, raspicam::RASPICAM_FORMAT_IGNORE);*/
-        memcpy(im.data, getCameraBuffer(), cameraBufferSize);
+        //camera.grab();
+        //camera.retrieve(im.data, raspicam::RASPICAM_FORMAT_IGNORE);
+        auto frame = getCameraBuffer();
+	    memcpy(im.data, frame.imData, cameraBufferSize);
         swapCameraBuffers();
 
         double tgrab = std::chrono::duration_cast<std::chrono::duration<double> >(std::chrono::steady_clock::now() - grab1).count();
@@ -398,7 +413,7 @@ int main(int argc, char **argv)
         // Pass the image to the SLAM system
         {
             std::unique_lock<std::mutex> lock{slamMutex};
-            SLAM.TrackMonocular(im, tframe);
+            SLAM.TrackMonocular(im, frame.timestamp);
         }
 
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
@@ -407,7 +422,7 @@ int main(int argc, char **argv)
         double ttotal = (tframe - prev_frame) / 1000000.0;
 
         metricsPacket.mFps = 1.0f/((tframe-prev_frame) / 1000000.0f);
-        //printf("grab time: %.04lf, track time: %.04lf, frame time: %llu, total: %.04lf, fps: %.1f\n", tgrab, ttrack, tframe, ttotal, 1.0/((tframe-prev_frame) / 1000000.0));
+        printf("grab time: %.04lf, track time: %.04lf, frame time: %llu, total: %.04lf, fps: %.1f\n", tgrab, ttrack, tframe, ttotal, 1.0/((tframe-prev_frame) / 1000000.0));
         prev_frame = tframe;
         // usleep(66666); // 15 fps
         // usleep(40000); // 25 fps
